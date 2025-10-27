@@ -55,26 +55,27 @@ func NewUPS(name string, client *Client) (UPS, error) {
 		Name:      name,
 		nutClient: client,
 	}
-	_, err := newUPS.GetClients()
+
+	// Only fetch basic info, defer variable/command details to lazy loading
+	_, err := newUPS.GetDescription()
 	if err != nil {
-		return newUPS, err
+		// Non-fatal, just log
+		if client.Logger != nil {
+			client.Logger.Printf("Warning: failed to get description for %s: %v", name, err)
+		}
 	}
-	_, err = newUPS.GetCommands()
-	if err != nil {
-		return newUPS, err
-	}
-	_, err = newUPS.GetDescription()
-	if err != nil {
-		return newUPS, err
-	}
+
 	_, err = newUPS.GetNumberOfLogins()
 	if err != nil {
-		return newUPS, err
+		// Non-fatal, just log
+		if client.Logger != nil {
+			client.Logger.Printf("Warning: failed to get number of logins for %s: %v", name, err)
+		}
 	}
-	_, err = newUPS.GetVariables()
-	if err != nil {
-		return newUPS, err
-	}
+
+	// Don't fetch clients/variables/commands during init - too slow and error-prone
+	// Users can call GetClients(), GetVariables() or GetCommands() when needed
+
 	return newUPS, nil
 }
 
@@ -251,29 +252,53 @@ func (u *UPS) GetVariableType(variableName string) (string, bool, int, error) {
 		return "UNKNOWN", false, -1, fmt.Errorf("empty response from GET TYPE")
 	}
 
+	// DEBUG: Log the raw response
+	if u.nutClient.Logger != nil {
+		u.nutClient.Logger.Printf("DEBUG GET TYPE response for %s: %#v", variableName, resp)
+	}
+
 	trimmedLine := strings.TrimPrefix(resp[0], fmt.Sprintf("TYPE %s %s ", u.Name, variableName))
+
+	// DEBUG: Log after trimming
+	if u.nutClient.Logger != nil {
+		u.nutClient.Logger.Printf("DEBUG trimmed line: %q", trimmedLine)
+	}
+
 	splitLine := strings.Split(trimmedLine, " ")
+
+	// DEBUG: Log split result
+	if u.nutClient.Logger != nil {
+		u.nutClient.Logger.Printf("DEBUG split line: %#v (len=%d)", splitLine, len(splitLine))
+	}
 
 	if len(splitLine) < 1 {
 		return "UNKNOWN", false, -1, fmt.Errorf("invalid TYPE response format")
 	}
 
-	writeable := (splitLine[0] == "RW")
+	writeable := false
 	varType := "UNKNOWN"
 	maximumLength := 0
 
-	// Determine the type based on whether it's RW or RO
-	if writeable {
-		if len(splitLine) < 2 {
-			return "UNKNOWN", writeable, -1, fmt.Errorf("invalid RW TYPE response format")
-		}
+	// Check if response includes RW/RO flag (newer NUT versions)
+	// or just the type (older NUT versions)
+	if len(splitLine) >= 2 && (splitLine[0] == "RW" || splitLine[0] == "RO") {
+		// Format: "RW TYPE" or "RO TYPE"
+		writeable = (splitLine[0] == "RW")
 		varType = splitLine[1]
+	} else if len(splitLine) >= 1 {
+		// Format: "TYPE" only (older NUT servers don't send RW/RO)
+		// Assume read-only by default for safety
+		writeable = false
+		varType = splitLine[0]
+
+		if u.nutClient.Logger != nil {
+			u.nutClient.Logger.Printf("Note: variable %s TYPE response has no RW/RO flag (old NUT version), assuming read-only", variableName)
+		}
 	} else {
-		// For RO, the type is at index 1, not index 0
-		if len(splitLine) < 2 {
-			return "UNKNOWN", writeable, -1, fmt.Errorf("invalid RO TYPE response format")
+		if u.nutClient.Logger != nil {
+			u.nutClient.Logger.Printf("Warning: variable %s has incomplete TYPE info: %q", variableName, trimmedLine)
 		}
-		varType = splitLine[1]
+		return "UNKNOWN", writeable, -1, fmt.Errorf("invalid TYPE response format: got empty response after parsing")
 	}
 
 	// Handle STRING:length format for both RW and RO
