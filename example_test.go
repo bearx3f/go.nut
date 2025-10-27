@@ -2,23 +2,34 @@ package nut
 
 import (
 	"fmt"
-
-	nut "github.com/robbiet480/go.nut"
+	"log"
 )
 
-// This example connects to NUT, authenticates and returns the first UPS listed.
-func ExampleGetUPSList() {
-	client, connectErr := nut.Connect("127.0.0.1")
-	if connectErr != nil {
-		fmt.Print(connectErr)
+// This example demonstrates how to connect to NUT, authenticate, and list UPS devices.
+func ExampleConnect() {
+	// Connect to NUT server (typically running on port 3493)
+	client, err := Connect("127.0.0.1")
+	if err != nil {
+		log.Fatal(err)
 	}
-	_, authenticationError = client.Authenticate("username", "password")
-	if authenticationError != nil {
-		fmt.Print(authenticationError)
+
+	// Authenticate
+	authenticated, err := client.Authenticate("username", "password")
+	if err != nil || !authenticated {
+		log.Fatal("authentication failed")
 	}
-	upsList, listErr := client.GetUPSList()
-	if listErr != nil {
-		fmt.Print(listErr)
+
+	// Get list of UPS devices
+	upsList, err := client.GetUPSList()
+	if err != nil {
+		log.Fatal(err)
 	}
-	fmt.Print("First UPS", upsList[0])
+
+	fmt.Println("Available UPS devices:", len(upsList))
+	if len(upsList) > 0 {
+		fmt.Println("First UPS:", upsList[0].Name)
+	}
+
+	// Clean disconnect
+	client.Disconnect()
 }
